@@ -98,7 +98,16 @@ ul.brechas li:last-child{border-bottom:0}
 .filaBarra b{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
 
 .envoltorioTabla{overflow-x:auto;-webkit-overflow-scrolling:touch}
-table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:680px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:780px}
+.marcaPago{display:inline-block;margin-top:4px;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:20px;white-space:nowrap}
+.marcaPago.ok{background:var(--ok-fondo);color:var(--ok)}
+.marcaPago.media{background:var(--medio-fondo);color:var(--medio)}
+.marcaPago.alta{background:var(--alto-fondo);color:var(--alto)}
+td.proforma{min-width:120px}
+.sinDato{font-size:12px;color:var(--tenue)}
+.notaMercado{font-size:12.5px;color:var(--suave);margin:-6px 0 18px;padding-left:10px;border-left:3px solid var(--acento)}
+.notaProforma{font-size:12.5px;color:var(--suave);line-height:1.55;margin-top:12px;padding:10px 12px;
+  border-left:3px solid var(--linea);background:#fbfcfd}
 th,td{padding:9px 10px;text-align:left;border-bottom:1px solid var(--linea);vertical-align:top}
 th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--suave);
   background:#f7f9fb;font-weight:650;white-space:nowrap}
@@ -260,6 +269,12 @@ var MONEDAS = [
   ['COP','$'], ['USD','US$'], ['MXN','MX$'], ['EUR','€'], ['PEN','S/'], ['SIN','']
 ];
 
+/* Moneda al abrir sin datos guardados (primera vez o tras «Reiniciar»).
+   USD porque el mercado objetivo es EE. UU. y los umbrales SBA están en
+   dólares. Una sola definición: antes el valor estaba repetido en cinco
+   sitios. Si hay datos guardados, manda la moneda que eligió el usuario. */
+var MONEDA_POR_DEFECTO = 'USD';
+
 var PROPOSITOS = [
   ['', '— seleccione —'],
   ['expansion','Expansión'],
@@ -276,20 +291,26 @@ var CAMPOS = [
 
   {id:'ingresos', grupo:'Operación mensual', tipo:'dinero', req:true,
    etiqueta:'Ingresos mensuales promedio', pista:'Promedio de los últimos 6 a 12 meses'},
-  {id:'gastos', grupo:'Operación mensual', tipo:'dinero', req:true,
-   etiqueta:'Gastos operativos mensuales promedio', pista:'Incluye costo de ventas y gastos fijos'},
   {id:'costoVentas', grupo:'Operación mensual', tipo:'dinero', req:false,
-   etiqueta:'Costo de ventas mensual', pista:'Sólo la mercancía vendida, sin gastos fijos. Es el divisor correcto de los días de inventario; si se deja vacío se usa el gasto operativo y el ciclo sale más corto de lo real'},
+   etiqueta:'Costo de ventas mensual', pista:'Lo que cuesta la mercancía vendida en el mes. Sin este dato no se calculan utilidad bruta, márgenes ni ciclo de efectivo'},
+  /* Los gastos operativos NO incluyen el costo de ventas: con la secuencia
+     utilidad bruta -> utilidad operativa, incluirlo lo restaría dos veces. */
+  {id:'gastos', grupo:'Operación mensual', tipo:'dinero', req:true,
+   etiqueta:'Gastos operativos mensuales promedio', pista:'SIN incluir el costo de ventas: arriendo, nómina administrativa, servicios, mercadeo'},
+  {id:'da', grupo:'Operación mensual', tipo:'dinero', req:false,
+   etiqueta:'Depreciación y amortización mensual', pista:'Necesaria para EBITDA y cobertura de deuda. Si se deja vacía no se calculan: no se asume cero'},
 
-  {id:'cxcMonto', grupo:'Ciclo comercial', tipo:'dinero', req:true,
+  {id:'caja', grupo:'Saldos de hoy y ciclo comercial', tipo:'dinero', req:false,
+   etiqueta:'Caja y bancos', pista:'Saldo disponible hoy. Sin él, la razón corriente y la prueba ácida subestiman la liquidez'},
+  {id:'cxcMonto', grupo:'Saldos de hoy y ciclo comercial', tipo:'dinero', req:true,
    etiqueta:'Cuentas por cobrar — monto pendiente', pista:'Saldo total por cobrar hoy'},
-  {id:'cxcDias', grupo:'Ciclo comercial', tipo:'dias', req:true,
+  {id:'cxcDias', grupo:'Saldos de hoy y ciclo comercial', tipo:'dias', req:true,
    etiqueta:'Cuentas por cobrar — días promedio de cobro', pista:'Días entre la venta y el pago del cliente'},
-  {id:'cxpMonto', grupo:'Ciclo comercial', tipo:'dinero', req:true,
+  {id:'cxpMonto', grupo:'Saldos de hoy y ciclo comercial', tipo:'dinero', req:true,
    etiqueta:'Cuentas por pagar — monto pendiente', pista:'Saldo total por pagar a proveedores'},
-  {id:'cxpDias', grupo:'Ciclo comercial', tipo:'dias', req:true,
+  {id:'cxpDias', grupo:'Saldos de hoy y ciclo comercial', tipo:'dias', req:true,
    etiqueta:'Cuentas por pagar — días promedio de pago', pista:'Días de plazo que dan los proveedores'},
-  {id:'inventario', grupo:'Ciclo comercial', tipo:'dinero', req:true,
+  {id:'inventario', grupo:'Saldos de hoy y ciclo comercial', tipo:'dinero', req:true,
    etiqueta:'Valor del inventario actual', pista:'Valorado al costo'},
 
   {id:'deudaMonto', grupo:'Obligaciones financieras vigentes', tipo:'dinero', req:true,
@@ -302,6 +323,38 @@ var CAMPOS = [
   {id:'propositoDetalle', grupo:'Propósito del capital buscado', tipo:'largo', req:false, ancho:true,
    etiqueta:'Descripción del propósito', pista:'Opcional — en qué se usaría el capital'}
 ];
+
+/* Textos fijos que aparecen en pantalla Y en el reporte. Viven aquí una
+   sola vez para que las dos salidas no puedan decir cosas distintas. */
+var NO_CALCULABLE = 'No calculable con los datos disponibles';
+
+var NOTA_ALCANCE = 'Este análisis no constituye un flujo de caja proyectado ni histórico. ' +
+  'Refleja indicadores de rentabilidad y estructura financiera con base en un corte único de información. ' +
+  'Un flujo de caja real requiere datos de saldos iniciales y finales del período, así como utilidad neta después de impuestos.';
+
+var NOTA_PORCION = 'La deuda a 12 meses usa la cuota completa (capital + intereses). Contablemente sólo cuenta el capital, ' +
+  'así que el pasivo corriente está sobreestimado y el capital de trabajo subestimado.';
+
+/* Mercado objetivo confirmado: EE. UU. Los umbrales SBA son la norma que
+   aplica, no una referencia externa. Texto literal del ticket del 18-09. */
+var NOTA_MERCADO = 'Los umbrales de referencia mostrados corresponden a normativa y práctica estándar de ' +
+  'Estados Unidos (SBA), consistente con el mercado objetivo del framework.';
+
+var REFERENCIAS_DSCR = 'Umbrales SBA: 7(a) Small Loan ≥ 1,10; 7(a) Standard ≥ 1,15; ' +
+  'banca comercial habitual 1,20 a 1,25. Por debajo de 1,00 el EBITDA no cubre la deuda.';
+
+/* Umbrales del DSCR. Los usan el DSCR actual (Módulo A) y el proforma de
+   cada alternativa (Módulo B): una sola escala, para que las dos lecturas
+   no puedan clasificar distinto la misma cobertura. */
+var DSCR_CUBRE = 1.00;      /* por debajo, el EBITDA no alcanza a pagar */
+var DSCR_PISO_SBA = 1.10;   /* mínimo SBA 7(a) Small Loan */
+function nivelDscr(d){
+  if (d === null || d === undefined || typeof d !== 'number' || !isFinite(d)) return null;
+  if (d < DSCR_CUBRE) return 'alta';
+  if (d < DSCR_PISO_SBA) return 'media';
+  return 'ok';
+}
+var ROTULO_DSCR = {ok:'Pagable', media:'Justo: bajo el piso SBA', alta:'No pagable'};
 
 /* El tercer valor es cuántos pagos caben en un mes. Se escribe como
    fracción exacta: con decimales truncados (0.333333) el pago por
@@ -355,18 +408,27 @@ function aNumero(bruto){
 }
 
 function simboloMoneda(){
-  var cod = (estado.empresa.moneda || 'COP');
+  var cod = (estado.empresa.moneda || MONEDA_POR_DEFECTO);
   for (var i=0;i<MONEDAS.length;i++) if (MONEDAS[i][0] === cod) return MONEDAS[i][1];
   return '';
 }
 
-var fmtEntero, fmtDecimal;
+var fmtEntero, fmtDecimal, fmtDos;
 try {
   fmtEntero  = new Intl.NumberFormat('es-CO', {maximumFractionDigits:0});
   fmtDecimal = new Intl.NumberFormat('es-CO', {minimumFractionDigits:1, maximumFractionDigits:1});
+  fmtDos     = new Intl.NumberFormat('es-CO', {minimumFractionDigits:2, maximumFractionDigits:2});
 } catch(e) {
   fmtEntero  = {format: function(n){ return String(Math.round(n)); }};
   fmtDecimal = {format: function(n){ return (Math.round(n*10)/10).toFixed(1); }};
+  fmtDos     = {format: function(n){ return (Math.round(n*100)/100).toFixed(2); }};
+}
+
+/* Razones (corriente, prueba ácida, DSCR): dos decimales, porque los
+   umbrales de referencia (1,10 · 1,15 · 1,25) se distinguen en el segundo. */
+function fmtRazon(n){
+  if (n === null || n === undefined || typeof n !== 'number' || !isFinite(n)) return 'No calculable';
+  return fmtDos.format(n);
 }
 
 function fmtDinero(n){
@@ -406,7 +468,7 @@ function altVacia(){
 }
 
 function estadoInicial(){
-  return {version:1, empresa:{moneda:'COP'}, alternativas:[altVacia(), altVacia()]};
+  return {version:1, empresa:{moneda:MONEDA_POR_DEFECTO}, alternativas:[altVacia(), altVacia()]};
 }
 
 var estado = estadoInicial();
@@ -452,7 +514,7 @@ function cargar(){
   } catch(e) {
     estado = estadoInicial();
   }
-  if (!estado.empresa.moneda) estado.empresa.moneda = 'COP';
+  if (!estado.empresa.moneda) estado.empresa.moneda = MONEDA_POR_DEFECTO;
 }
 
 function pintarEstadoAlmacen(){
@@ -500,44 +562,95 @@ function calcularEmpresa(){
   }
   if (!e.propositoTipo) faltantes.push({id:'propositoTipo', etiqueta:'Destino principal del capital'});
 
-  /* --- Ciclo de conversión de efectivo ---
-     Los días de inventario se miden contra el COSTO DE VENTAS, que es lo
-     que sale del inventario. Si no se registró, se usa el gasto operativo
-     como sustituto y se dice en pantalla: al ser mayor, el ciclo resultante
-     es más CORTO que el real. */
-  var baseInv = null, baseInvEsSustituto = false;
-  if (v.costoVentas !== null && v.costoVentas > 0) {
-    baseInv = v.costoVentas;
-  } else if (v.gastos !== null && v.gastos > 0) {
-    baseInv = v.gastos;
-    baseInvEsSustituto = true;
+  /* --- Rentabilidad (nivel 1 del anexo) ---
+     Secuencia estándar del estado de resultados:
+       utilidad bruta     = ingresos − costo de ventas
+       utilidad operativa = utilidad bruta − gastos operativos (EBIT aprox.)
+       EBITDA aprox.      = utilidad operativa + depreciación y amortización
+     Todo mensual. Sin el dato que hace falta, el indicador es null: nunca
+     se sustituye por cero. */
+  var utilBruta = null, margenBrutoPct = null, utilOper = null, margenOperPct = null, ebitda = null;
+  if (v.ingresos !== null && v.costoVentas !== null) {
+    utilBruta = v.ingresos - v.costoVentas;
+    if (v.ingresos > 0) margenBrutoPct = utilBruta / v.ingresos * 100;
   }
+  if (utilBruta !== null && v.gastos !== null) {
+    utilOper = utilBruta - v.gastos;
+    if (v.ingresos > 0) margenOperPct = utilOper / v.ingresos * 100;
+  }
+  if (utilOper !== null && v.da !== null) ebitda = utilOper + v.da;
+
+  /* --- Ciclo de conversión de efectivo ---
+     Días de inventario = inventario ÷ costo de ventas × 30, sin sustituto.
+     Antes se usaba el gasto operativo cuando faltaba el costo de ventas;
+     desde que los gastos operativos se definen SIN costo de ventas, ese
+     sustituto ya no aproxima nada, así que sin el dato no se calcula. */
   var diasInv = null;
-  if (v.inventario !== null && baseInv !== null) {
-    diasInv = v.inventario / (baseInv / 30);
+  if (v.inventario !== null && v.costoVentas !== null && v.costoVentas > 0) {
+    diasInv = v.inventario / (v.costoVentas / 30);
   }
   var cce = null;
   if (diasInv !== null && v.cxcDias !== null && v.cxpDias !== null) {
     cce = diasInv + v.cxcDias - v.cxpDias;
   }
 
-  /* --- Capital de trabajo neto --- */
+  /* --- Capital de trabajo neto ---
+     El activo corriente incluye la caja si se registró; sin caja queda
+     subestimado, y la pantalla lo dice. Razón corriente y capital de
+     trabajo usan el MISMO activo y pasivo, para que no se contradigan. */
   var activo = null, pasivo = null, ctn = null, porcionCorriente = null;
-  if (v.cxcMonto !== null && v.inventario !== null) activo = v.cxcMonto + v.inventario;
+  var hayCaja = (v.caja !== null);
+  if (v.cxcMonto !== null && v.inventario !== null) {
+    activo = v.cxcMonto + v.inventario + (hayCaja ? v.caja : 0);
+  }
   /* Del saldo de la deuda sólo es pasivo corriente lo que vence dentro de
-     doce meses, y nunca más que el propio saldo: si el crédito se termina
-     de pagar antes del año, la porción corriente es el saldo entero. */
+     doce meses, y nunca más que el propio saldo. LIMITACIÓN CONOCIDA: la
+     cuota incluye intereses y contablemente sólo cuenta el capital, así que
+     este pasivo está sobreestimado. Separarlo exige la tasa de cada crédito
+     (fase 2); mientras, se declara en pantalla y en el reporte. */
   if (v.deudaPago !== null && v.deudaMonto !== null) {
     porcionCorriente = Math.min(v.deudaPago * 12, v.deudaMonto);
   }
   if (v.cxpMonto !== null && porcionCorriente !== null) pasivo = v.cxpMonto + porcionCorriente;
   if (activo !== null && pasivo !== null) ctn = activo - pasivo;
 
-  /* --- Margen operativo mensual --- */
-  var margen = null, margenPct = null;
-  if (v.ingresos !== null && v.gastos !== null) {
-    margen = v.ingresos - v.gastos;
-    if (v.ingresos > 0) margenPct = margen / v.ingresos * 100;
+  /* --- Liquidez (nivel 2 del anexo) ---
+     Razón corriente = activo corriente ÷ pasivo corriente
+     Prueba ácida    = (activo corriente − inventario) ÷ pasivo corriente
+     Con pasivo cero la razón no existe: se declara, no se divide. */
+  var razonCorriente = null, pruebaAcida = null, sinPasivo = false;
+  if (activo !== null && pasivo !== null) {
+    if (pasivo > 0) {
+      razonCorriente = activo / pasivo;
+      pruebaAcida = (activo - v.inventario) / pasivo;
+    } else {
+      sinPasivo = true;
+    }
+  }
+
+  /* --- Cobertura del servicio de deuda (DSCR) ---
+     Definición de la SBA (PN 5000-875701): EBITDA ÷ pagos requeridos de
+     capital e intereses, EN EL MISMO PERÍODO. El EBITDA del dashboard es
+     mensual, así que los dos lados se anualizan:
+       DSCR = (EBITDA mensual × 12) ÷ (cuota mensual × 12)
+     El anexo escribía EBITDA ÷ (cuota × 12), que da un resultado 12 veces
+     menor que el real. */
+  var dscr = null, sinServicioDeuda = false;
+  if (ebitda !== null && v.deudaPago !== null) {
+    if (v.deudaPago > 0) dscr = (ebitda * 12) / (v.deudaPago * 12);
+    else sinServicioDeuda = true;
+  }
+
+  /* --- Coherencia de los días declarados ---
+     Los días de cobro y de pago se capturan como dato, pero también se
+     deducen de los saldos (DSO = CxC ÷ ingresos × 30; DPO = CxP ÷ costo de
+     ventas × 30). Si difieren mucho, algún dato no cuadra. Sólo informa. */
+  var dsoImplicito = null, dpoImplicito = null;
+  if (v.cxcMonto !== null && v.ingresos !== null && v.ingresos > 0) dsoImplicito = v.cxcMonto / v.ingresos * 30;
+  if (v.cxpMonto !== null && v.costoVentas !== null && v.costoVentas > 0) dpoImplicito = v.cxpMonto / v.costoVentas * 30;
+  function discrepa(declarado, implicito){
+    if (declarado === null || implicito === null) return false;
+    return Math.abs(declarado - implicito) > Math.max(0.5 * implicito, 5);
   }
 
   /* --- Brechas detectadas --- */
@@ -561,8 +674,47 @@ function calcularEmpresa(){
     brecha('alta', 'El capital de trabajo neto estimado es negativo (' + fmtDinero(ctn) +
       '): las obligaciones de corto plazo superan los activos corrientes estimados.');
 
-  if (margen !== null && margen < 0)
-    brecha('alta', 'Los gastos operativos mensuales superan a los ingresos en ' + fmtDinero(Math.abs(margen)) + '.');
+  function sinDato(id){ return !e[id] || !String(e[id]).trim(); }
+
+  if (sinDato('costoVentas'))
+    brecha('media', 'No se registró el costo de ventas. Sin él no se calculan la utilidad bruta, los márgenes, ' +
+      'la utilidad operativa, el EBITDA, la cobertura de deuda ni el ciclo de conversión de efectivo.');
+
+  if (utilBruta !== null && utilBruta < 0)
+    brecha('alta', 'La utilidad bruta es negativa (' + fmtDinero(utilBruta) + '): el costo de lo vendido supera a los ingresos.');
+  else if (utilOper !== null && utilOper < 0)
+    brecha('alta', 'La utilidad operativa es negativa (' + fmtDinero(utilOper) +
+      '): la utilidad bruta no alcanza a cubrir los gastos operativos.');
+
+  if (razonCorriente !== null && razonCorriente < 1)
+    brecha('alta', 'La razón corriente es ' + fmtRazon(razonCorriente) +
+      ': el activo corriente estimado no alcanza a cubrir el pasivo corriente (referencia: por debajo de 1,0 hay riesgo de liquidez).');
+
+  /* Prioridad media, no alta: con inventario material una prueba ácida
+     bajo 1 es lo esperable. Texto literal del ticket del 18-09. */
+  if (pruebaAcida !== null && pruebaAcida < 1)
+    brecha('media', 'La prueba ácida está por debajo de 1. En negocios con inventario material esto puede ser esperable, ' +
+      'pero conviene revisarlo junto con el ciclo de conversión de efectivo.');
+
+  if (nivelDscr(dscr) === 'alta')
+    brecha('alta', 'La cobertura del servicio de deuda (DSCR) es ' + fmtRazon(dscr) +
+      ': el EBITDA no alcanza para pagar la deuda actual.');
+  else if (nivelDscr(dscr) === 'media')
+    brecha('media', 'La cobertura del servicio de deuda (DSCR) es ' + fmtRazon(dscr) +
+      ': alcanza, pero está por debajo del 1,10 mínimo que exige la SBA para préstamos 7(a) Small Loan.');
+
+  if (sinDato('da') && utilOper !== null)
+    brecha('info', 'No se registró la depreciación y amortización, así que no se calculan el EBITDA ni la cobertura del servicio de deuda.');
+
+  if (sinDato('caja') && activo !== null)
+    brecha('info', 'No se registró la caja: el activo corriente, la razón corriente y la prueba ácida están subestimados.');
+
+  if (discrepa(v.cxcDias, dsoImplicito))
+    brecha('info', 'Los días de cobro declarados (' + fmtDias(v.cxcDias) + ') no cuadran con los que implican los saldos (' +
+      fmtDias(dsoImplicito) + ' = cuentas por cobrar ÷ ingresos × 30). Revise ambos datos: un analista hará esta misma cuenta.');
+  if (discrepa(v.cxpDias, dpoImplicito))
+    brecha('info', 'Los días de pago declarados (' + fmtDias(v.cxpDias) + ') no cuadran con los que implican los saldos (' +
+      fmtDias(dpoImplicito) + ' = cuentas por pagar ÷ costo de ventas × 30). Revise ambos datos.');
 
   if (v.cxcDias !== null && v.cxpDias !== null && (v.cxcDias - v.cxpDias) > 30)
     brecha('media', 'Se cobra ' + fmtDias(v.cxcDias - v.cxpDias) + ' más tarde de lo que se paga a proveedores; esa diferencia se financia con caja propia.');
@@ -571,16 +723,8 @@ function calcularEmpresa(){
     brecha('alta', 'El pago mensual de deuda equivale al ' + fmtPorcentaje(v.deudaPago / v.ingresos * 100) +
       ' de los ingresos mensuales, por encima del 30 % de referencia.');
 
-  if (diasInv !== null && baseInvEsSustituto)
-    brecha('media', 'Los días de inventario (' + fmtDias(diasInv) + ') se estimaron con el gasto operativo mensual, ' +
-      'porque no se registró el costo de ventas. El gasto operativo incluye costos fijos que no salen del inventario, ' +
-      'así que el ciclo real es MÁS LARGO que el mostrado. Registre el costo de ventas para cerrar esta brecha.');
-
   if (diasInv !== null && diasInv > 90)
-    brecha('media', 'El inventario equivale a ' + fmtDias(diasInv) + ' de operación: hay capital inmovilizado en existencias.');
-
-  if (v.gastos !== null && v.gastos === 0)
-    brecha('media', 'Los gastos operativos son cero, lo que impide estimar la rotación de inventario y el ciclo de efectivo.');
+    brecha('media', 'El inventario equivale a ' + fmtDias(diasInv) + ' de costo de ventas: hay capital inmovilizado en existencias.');
 
   if (!estado.empresa.propositoDetalle || !String(estado.empresa.propositoDetalle).trim())
     brecha('info', 'No se describió el propósito del capital buscado; ese texto es el que sustenta la solicitud ante un financiador.');
@@ -619,8 +763,11 @@ function calcularEmpresa(){
 
   return {
     v:v, diasInv:diasInv, cce:cce, ctn:ctn, activo:activo, pasivo:pasivo,
-    baseInv:baseInv, baseInvEsSustituto:baseInvEsSustituto, porcionCorriente:porcionCorriente,
-    margen:margen, margenPct:margenPct, brechas:brechas, nivel:nivel,
+    porcionCorriente:porcionCorriente, hayCaja:hayCaja,
+    utilBruta:utilBruta, margenBrutoPct:margenBrutoPct, utilOper:utilOper, margenOperPct:margenOperPct,
+    ebitda:ebitda, razonCorriente:razonCorriente, pruebaAcida:pruebaAcida, sinPasivo:sinPasivo,
+    dscr:dscr, sinServicioDeuda:sinServicioDeuda, dsoImplicito:dsoImplicito, dpoImplicito:dpoImplicito,
+    brechas:brechas, nivel:nivel,
     requeridos:requeridos, diligenciados:diligenciados, pendientes:pendientes
   };
 }
@@ -638,7 +785,17 @@ function etiquetaFrecuencia(codigo){
   return '—';
 }
 
-function calcularAlternativas(){
+/* Recibe el cálculo del Módulo A para usar SU EBITDA y SU cuota actual:
+   el DSCR proforma no recalcula ni copia nada de la empresa. */
+function calcularAlternativas(calcEmp){
+  if (!calcEmp) calcEmp = calcularEmpresa();
+  var ebitda = calcEmp.ebitda, cuotaActual = calcEmp.v.deudaPago;
+  var motivoProforma = null;
+  if (ebitda === null) {
+    motivoProforma = 'Requiere el EBITDA del Módulo A: ingresos, costo de ventas, gastos operativos y depreciación y amortización.';
+  } else if (cuotaActual === null) {
+    motivoProforma = 'Requiere la cuota mensual actual de deuda del Módulo A (0 si la empresa no tiene deudas).';
+  }
   var filas = [];
   for (var i=0;i<estado.alternativas.length;i++) {
     var a = estado.alternativas[i];
@@ -668,15 +825,37 @@ function calcularAlternativas(){
       f.pagoPeriodo = ppm > 0 ? f.costoTotal / (f.plazo * ppm) : f.costoTotal;
       f.sobrecosto = f.monto > 0 ? (f.interes / f.monto * 100) : null;
       f.completa = true;
+
+      /* DSCR proforma: ¿cubre el EBITDA la deuda actual MÁS esta?
+         (EBITDA × 12) ÷ ((cuota actual + pago mensual) × 12)
+         = EBITDA ÷ (cuota actual + pago mensual). El pago mensual es el
+         equivalente mensual del Módulo B, sea cual sea la frecuencia. */
+      f.dscrProforma = null;
+      f.nivelProforma = null;
+      if (motivoProforma === null) {
+        f.servicioProforma = cuotaActual + f.pagoMensual;
+        f.dscrProforma = ebitda / f.servicioProforma;
+        f.nivelProforma = nivelDscr(f.dscrProforma);
+      }
     }
     filas.push(f);
   }
 
   var completas = [], incompletas = [];
   for (var j=0;j<filas.length;j++) (filas[j].completa ? completas : incompletas).push(filas[j]);
+  /* El orden NO cambia: sigue siendo por costo total. El DSCR proforma
+     es una columna más, no un criterio de orden. */
   completas.sort(function(a,b){ return a.costoTotal - b.costoTotal; });
 
-  return {completas:completas, incompletas:incompletas, total:filas.length};
+  /* La de mejor cobertura se señala aparte, sólo si no es la más barata. */
+  var mejorCobertura = null;
+  for (var m=0;m<completas.length;m++) {
+    if (completas[m].dscrProforma === null) continue;
+    if (mejorCobertura === null || completas[m].dscrProforma > mejorCobertura.dscrProforma) mejorCobertura = completas[m];
+  }
+
+  return {completas:completas, incompletas:incompletas, total:filas.length,
+          motivoProforma:motivoProforma, ebitda:ebitda, cuotaActual:cuotaActual, mejorCobertura:mejorCobertura};
 }
 
 /* ============================================================
@@ -742,7 +921,7 @@ function volcarFormulario(){
     if (!el) continue;
     var val = estado.empresa[c.id];
     el.value = (val === undefined || val === null) ? '' : val;
-    if (c.tipo === 'moneda' && !el.value) el.value = 'COP';
+    if (c.tipo === 'moneda' && !el.value) el.value = MONEDA_POR_DEFECTO;
   }
 }
 
@@ -849,52 +1028,108 @@ function pintarResultados(calc){
   h += '<span class="detalle">' + esc(calc.nivel.detalle) + '</span>';
   h += '</div>';
 
-  h += '<div class="tarjetas">';
-
-  h += '<div class="tarjeta"><div class="rotulo">Ciclo de conversión de efectivo</div>';
-  if (calc.cce === null) {
-    h += '<div class="cifra neutro">Dato faltante</div>';
-    h += '<div class="formula">Requiere inventario, costo de ventas o gastos operativos (mayores a cero) y los días de cobro y de pago.</div>';
-  } else {
-    h += '<div class="cifra ' + (calc.cce > 60 ? 'mal' : (calc.cce <= 30 ? 'bien' : '')) + '">' + esc(fmtDias(calc.cce)) + '</div>';
-    h += '<div class="formula">días de inventario (' + esc(fmtDecimal.format(calc.diasInv)) + ') + días de cobro (' +
-         esc(fmtDecimal.format(calc.v.cxcDias)) + ') − días de pago (' + esc(fmtDecimal.format(calc.v.cxpDias)) + ')' +
-         '<br>días de inventario = ' + esc(fmtDinero(calc.v.inventario)) + ' ÷ (' + esc(fmtDinero(calc.baseInv)) + ' ÷ 30)' +
-         (calc.baseInvEsSustituto
-           ? '<br><b style="color:#9a6510">Divisor: gasto operativo, por falta del costo de ventas. El ciclo real es más largo.</b>'
-           : '<br>Divisor: costo de ventas mensual.') +
-         '</div>';
+  /* Una tarjeta: rótulo, cifra (o "no calculable" con lo que falta) y la
+     fórmula con sus números. Cada indicador enseña de dónde sale. */
+  function tarjeta(rotulo, cifra, clase, formula, falta){
+    var t = '<div class="tarjeta"><div class="rotulo">' + esc(rotulo) + '</div>';
+    if (cifra === null) {
+      t += '<div class="cifra neutro">' + esc(NO_CALCULABLE) + '</div>';
+      t += '<div class="formula">' + falta + '</div>';
+    } else {
+      t += '<div class="cifra ' + clase + '">' + esc(cifra) + '</div>';
+      t += '<div class="formula">' + formula + '</div>';
+    }
+    return t + '</div>';
   }
+  var v = calc.v;
+
+  /* ---------- Rentabilidad mensual ---------- */
+  h += '<h3>Rentabilidad mensual</h3><div class="tarjetas">';
+
+  h += tarjeta('Utilidad bruta',
+    calc.utilBruta === null ? null : fmtDinero(calc.utilBruta),
+    calc.utilBruta !== null && calc.utilBruta < 0 ? 'mal' : 'bien',
+    'ingresos ' + esc(fmtDinero(v.ingresos)) + ' − costo de ventas ' + esc(fmtDinero(v.costoVentas)) +
+      (calc.margenBrutoPct === null ? '' : '<br>Margen bruto: <b>' + esc(fmtPorcentaje(calc.margenBrutoPct)) + '</b> de los ingresos'),
+    'Requiere ingresos y costo de ventas.');
+
+  h += tarjeta('Utilidad operativa (EBIT aprox.)',
+    calc.utilOper === null ? null : fmtDinero(calc.utilOper),
+    calc.utilOper !== null && calc.utilOper < 0 ? 'mal' : 'bien',
+    'utilidad bruta ' + esc(fmtDinero(calc.utilBruta)) + ' − gastos operativos ' + esc(fmtDinero(v.gastos)) +
+      (calc.margenOperPct === null ? '' : '<br>Margen operativo: <b>' + esc(fmtPorcentaje(calc.margenOperPct)) + '</b> de los ingresos'),
+    'Requiere ingresos, costo de ventas y gastos operativos.');
+
+  h += tarjeta('EBITDA aproximado',
+    calc.ebitda === null ? null : fmtDinero(calc.ebitda),
+    calc.ebitda !== null && calc.ebitda < 0 ? 'mal' : 'bien',
+    'utilidad operativa ' + esc(fmtDinero(calc.utilOper)) + ' + depreciación y amortización ' + esc(fmtDinero(v.da)),
+    'Requiere la utilidad operativa y la depreciación y amortización. Si falta, no se asume cero.');
+
   h += '</div>';
 
-  h += '<div class="tarjeta"><div class="rotulo">Capital de trabajo neto</div>';
-  if (calc.ctn === null) {
-    h += '<div class="cifra neutro">Dato faltante</div>';
-    h += '<div class="formula">Requiere cuentas por cobrar, inventario, cuentas por pagar y el pago mensual de deuda.</div>';
-  } else {
-    h += '<div class="cifra ' + (calc.ctn < 0 ? 'mal' : 'bien') + '">' + esc(fmtDinero(calc.ctn)) + '</div>';
-    h += '<div class="formula">activo corriente estimado ' + esc(fmtDinero(calc.activo)) +
-         ' (por cobrar + inventario)<br>− pasivo corriente estimado ' + esc(fmtDinero(calc.pasivo)) +
-         ' = por pagar ' + esc(fmtDinero(calc.v.cxpMonto)) + ' + deuda que vence en 12 meses ' +
-         esc(fmtDinero(calc.porcionCorriente)) +
-         (calc.porcionCorriente === calc.v.deudaMonto
-           ? '<br>La deuda se termina de pagar dentro del año: entra el saldo completo.'
-           : '<br>Del saldo de ' + esc(fmtDinero(calc.v.deudaMonto)) + ' sólo entran las 12 cuotas del próximo año; el resto es pasivo de largo plazo.') +
-         '</div>';
-  }
-  h += '</div>';
+  /* ---------- Liquidez y deuda ---------- */
+  h += '<h3>Liquidez y deuda</h3><div class="tarjetas">';
 
-  h += '<div class="tarjeta"><div class="rotulo">Margen operativo mensual</div>';
-  if (calc.margen === null) {
-    h += '<div class="cifra neutro">Dato faltante</div>';
-    h += '<div class="formula">Requiere ingresos y gastos operativos mensuales.</div>';
-  } else {
-    h += '<div class="cifra ' + (calc.margen < 0 ? 'mal' : 'bien') + '">' + esc(fmtDinero(calc.margen)) + '</div>';
-    h += '<div class="formula">ingresos − gastos operativos' +
-         (calc.margenPct === null ? '' : ' · equivale al ' + esc(fmtPorcentaje(calc.margenPct)) + ' de los ingresos') + '</div>';
-  }
-  h += '</div>';
+  var notaCaja = calc.hayCaja ? '' : '<br><b style="color:#9a6510">Sin caja registrada: subestima la liquidez.</b>';
 
+  h += tarjeta('Capital de trabajo neto',
+    calc.ctn === null ? null : fmtDinero(calc.ctn),
+    calc.ctn !== null && calc.ctn < 0 ? 'mal' : 'bien',
+    'activo corriente ' + esc(fmtDinero(calc.activo)) +
+      ' (' + (calc.hayCaja ? 'caja ' + esc(fmtDinero(v.caja)) + ' + ' : '') + 'por cobrar + inventario)' +
+      '<br>− pasivo corriente ' + esc(fmtDinero(calc.pasivo)) +
+      ' (por pagar ' + esc(fmtDinero(v.cxpMonto)) + ' + deuda a 12 meses ' + esc(fmtDinero(calc.porcionCorriente)) + ')' +
+      (calc.porcionCorriente === v.deudaMonto
+        ? '<br>La deuda se termina de pagar dentro del año: entra el saldo completo.'
+        : '<br>Del saldo de ' + esc(fmtDinero(v.deudaMonto)) + ' sólo entran 12 cuotas; el resto es largo plazo.') +
+      '<br><i>' + esc(NOTA_PORCION) + '</i>' + notaCaja,
+    'Requiere cuentas por cobrar, inventario, cuentas por pagar, saldo y cuota de la deuda.');
+
+  var faltaLiquidez = calc.sinPasivo
+    ? 'El pasivo corriente es cero: la razón no existe (no hay obligaciones de corto plazo que cubrir).'
+    : 'Requiere los mismos datos que el capital de trabajo neto.';
+
+  h += tarjeta('Razón corriente',
+    calc.razonCorriente === null ? null : fmtRazon(calc.razonCorriente),
+    calc.razonCorriente !== null && calc.razonCorriente < 1 ? 'mal' : (calc.razonCorriente >= 1.5 ? 'bien' : ''),
+    'activo corriente ' + esc(fmtDinero(calc.activo)) + ' ÷ pasivo corriente ' + esc(fmtDinero(calc.pasivo)) +
+      '<br>Referencia: por debajo de 1,0 hay riesgo de liquidez; entre 1,5 y 2,0 se considera saludable para una pyme comercial (varía por sector).' +
+      notaCaja,
+    faltaLiquidez);
+
+  h += tarjeta('Prueba ácida',
+    calc.pruebaAcida === null ? null : fmtRazon(calc.pruebaAcida),
+    calc.pruebaAcida !== null && calc.pruebaAcida < 1 ? 'mal' : 'bien',
+    '(activo corriente ' + esc(fmtDinero(calc.activo)) + ' − inventario ' + esc(fmtDinero(v.inventario)) +
+      ') ÷ pasivo corriente ' + esc(fmtDinero(calc.pasivo)) +
+      '<br>Excluye el inventario: mide cuánto depende la liquidez de vender existencias. 1,0 o más indica liquidez suficiente sin vender inventario.' +
+      notaCaja,
+    faltaLiquidez);
+
+  h += tarjeta('Cobertura del servicio de deuda (DSCR)',
+    calc.dscr === null ? null : fmtRazon(calc.dscr) + ' veces',
+    nivelDscr(calc.dscr) === 'alta' ? 'mal' : (nivelDscr(calc.dscr) === 'media' ? '' : 'bien'),
+    '(EBITDA ' + esc(fmtDinero(calc.ebitda)) + ' × 12) ÷ (cuota ' + esc(fmtDinero(v.deudaPago)) + ' × 12)' +
+      '<br>Definición de la SBA: EBITDA ÷ pagos de capital e intereses del mismo período.' +
+      '<br>' + esc(REFERENCIAS_DSCR) +
+      '<br><i>El EBITDA no descuenta impuestos: un banco que use flujo disponible después de impuestos obtendrá una cobertura menor.</i>',
+    calc.sinServicioDeuda
+      ? 'La cuota mensual de deuda es cero: no hay servicio de deuda que cubrir.'
+      : 'Requiere el EBITDA (utilidad operativa + depreciación y amortización) y la cuota mensual de deuda.');
+
+  h += '</div>';
+  h += '<p class="notaMercado">' + esc(NOTA_MERCADO) + '</p>';
+
+  /* ---------- Ciclo de efectivo ---------- */
+  h += '<h3>Ciclo de efectivo</h3><div class="tarjetas">';
+  h += tarjeta('Ciclo de conversión de efectivo',
+    calc.cce === null ? null : fmtDias(calc.cce),
+    calc.cce !== null && calc.cce > 60 ? 'mal' : (calc.cce !== null && calc.cce <= 30 ? 'bien' : ''),
+    'días de inventario (' + esc(fmtDecimal.format(calc.diasInv)) + ') + días de cobro (' +
+      esc(fmtDecimal.format(v.cxcDias)) + ') − días de pago (' + esc(fmtDecimal.format(v.cxpDias)) + ')' +
+      '<br>días de inventario = ' + esc(fmtDinero(v.inventario)) + ' ÷ (costo de ventas ' + esc(fmtDinero(v.costoVentas)) + ' ÷ 30)',
+    'Requiere inventario, costo de ventas (mayor que cero) y los días de cobro y de pago. Sin costo de ventas no se usa ningún sustituto.');
   h += '</div>';
 
   if (calc.cce !== null) {
@@ -914,6 +1149,8 @@ function pintarResultados(calc){
     }
     h += '</div>';
   }
+
+  h += '<div class="aviso" style="margin:18px 0 0">' + esc(NOTA_ALCANCE) + '</div>';
 
   h += '<h3 style="margin-top:24px">Brechas detectadas (' + calc.brechas.length + ')</h3>';
   if (!calc.brechas.length) {
@@ -948,8 +1185,8 @@ function pintarComparativo(comp){
   h += '<div class="envoltorioTabla"><table><thead><tr>';
   h += '<th>#</th><th>Alternativa</th><th class="num">Monto</th><th class="num">Plazo</th>' +
        '<th class="num">Tasa anual</th><th>Frecuencia</th><th class="num">Costo financiero</th>' +
-       '<th class="num">Costo total estimado</th><th class="num">Pago mensual estimado</th>' +
-       '<th class="num">Pago por periodo</th><th>Requisitos</th>';
+       '<th class="num">Costo total estimado</th><th class="num">DSCR proforma</th>' +
+       '<th class="num">Pago mensual estimado</th><th class="num">Pago por periodo</th><th>Requisitos</th>';
   h += '</tr></thead><tbody>';
 
   var mayor = 0;
@@ -969,6 +1206,14 @@ function pintarComparativo(comp){
          esc(fmtPorcentaje(f.sobrecosto)) + ' del monto</small></td>';
     h += '<td class="num"><b>' + esc(fmtDinero(f.costoTotal)) + '</b>' +
          '<div class="barraCosto" style="width:' + pct.toFixed(1) + '%"></div></td>';
+    /* Junto al costo total: costo y capacidad de pago se leen lado a lado,
+       sin desplazar la tabla. */
+    if (f.dscrProforma === null) {
+      h += '<td class="proforma"><span class="sinDato">' + esc(NO_CALCULABLE) + '</span></td>';
+    } else {
+      h += '<td class="num"><b>' + esc(fmtRazon(f.dscrProforma)) + '</b><br>' +
+           '<span class="marcaPago ' + f.nivelProforma + '">' + esc(ROTULO_DSCR[f.nivelProforma]) + '</span></td>';
+    }
     h += '<td class="num">' + esc(fmtDinero(f.pagoMensual)) + '</td>';
     h += '<td class="num">' + esc(fmtDinero(f.pagoPeriodo)) + '</td>';
     h += '<td>' + (f.requisitos ? esc(f.requisitos) : '<span style="color:#8b95a1">Sin registrar</span>') + '</td>';
@@ -978,11 +1223,36 @@ function pintarComparativo(comp){
   for (var k=0;k<comp.incompletas.length;k++) {
     var g = comp.incompletas[k];
     h += '<tr class="incompleta"><td class="num">—</td><td>' + esc(g.nombre) + '</td>';
-    h += '<td colspan="9">Datos incompletos: falta ' + esc(g.faltan.join(', ')) +
+    h += '<td colspan="10">Datos incompletos: falta ' + esc(g.faltan.join(', ')) +
          ' (deben ser números mayores que cero).</td></tr>';
   }
 
   h += '</tbody></table></div>';
+
+  /* Nota del DSCR proforma: qué mide, por qué no se calcula si falta algo,
+     y la alternativa de mejor cobertura cuando no es la más barata. */
+  if (comp.completas.length) {
+    h += '<div class="notaProforma"><b>DSCR proforma:</b> ¿cubre el EBITDA la deuda actual <i>más</i> esta alternativa? ' +
+         '(EBITDA × 12) ÷ ((cuota actual + pago mensual de la alternativa) × 12). ' +
+         'Es la medida que usa la SBA, que cuenta el préstamo nuevo dentro del servicio de deuda. ' +
+         'Mismos umbrales que el DSCR actual: por debajo de 1,00 no es pagable; entre 1,00 y 1,10 alcanza, pero bajo el piso SBA. ' +
+         esc(NOTA_MERCADO);
+    if (comp.motivoProforma !== null) {
+      h += '<br><b>' + esc(NO_CALCULABLE) + ':</b> ' + esc(comp.motivoProforma);
+    } else {
+      h += '<br>EBITDA mensual ' + esc(fmtDinero(comp.ebitda)) + ' · cuota actual de deuda ' + esc(fmtDinero(comp.cuotaActual)) + '.';
+      var barata = comp.completas[0];
+      if (comp.completas.length > 1 && comp.mejorCobertura && comp.mejorCobertura !== barata) {
+        h += '<br><b>La alternativa de menor costo no es la de mejor cobertura.</b> ' +
+             esc(barata.nombre) + ' cuesta menos (DSCR ' + esc(fmtRazon(barata.dscrProforma)) + '), pero ' +
+             esc(comp.mejorCobertura.nombre) + ' deja más holgura para pagar (DSCR ' +
+             esc(fmtRazon(comp.mejorCobertura.dscrProforma)) + '), porque reparte el pago en más meses.';
+      }
+      h += '<br><i>Con frecuencia «pago único al vencimiento», el pago mensual es un promedio: ' +
+           'indica cuánto habría que apartar cada mes, no un pago que se haga cada mes.</i>';
+    }
+    h += '</div>';
+  }
   h += '<p class="pieNota"><b>Estimación simplificada, no sustituye asesoría financiera.</b> ' +
        'El costo financiero se calcula como monto × tasa anual × (plazo en meses ÷ 12), sin amortización, ' +
        'sin capitalización de intereses y sin comisiones, seguros ni impuestos. El costo real de cada producto ' +
@@ -1008,7 +1278,7 @@ function construirReporte(calc, comp){
   regla();
   ln('Empresa : ' + nom);
   ln('Fecha   : ' + new Date().toLocaleString('es-CO'));
-  ln('Moneda  : ' + (estado.empresa.moneda || 'COP'));
+  ln('Moneda  : ' + (estado.empresa.moneda || MONEDA_POR_DEFECTO));
   ln();
   ln('ESTIMACIONES SIMPLIFICADAS CON FINES ILUSTRATIVOS.');
   ln('Este reporte no constituye un diagnóstico financiero ni sustituye');
@@ -1049,29 +1319,66 @@ function construirReporte(calc, comp){
   regla();
   ln('3. INDICADORES CALCULADOS (Framework, Módulo 4)');
   regla();
-  ln('  Ciclo de conversión de efectivo : ' + (calc.cce === null ? 'No calculable con los datos actuales' : fmtDias(calc.cce)));
-  if (calc.cce !== null) {
-    ln('      días de inventario      : ' + fmtDias(calc.diasInv) +
-       '  (' + fmtDinero(calc.v.inventario) + ' / (' + fmtDinero(calc.baseInv) + ' / 30))');
-    ln('      divisor usado           : ' + (calc.baseInvEsSustituto
-        ? 'GASTO OPERATIVO como sustituto — no se registró el costo de ventas.'
-        : 'costo de ventas mensual.'));
-    if (calc.baseInvEsSustituto)
-      ln('                                El ciclo real es MÁS LARGO que el mostrado.');
-    ln('      días de cobro           : ' + fmtDias(calc.v.cxcDias));
-    ln('      días de pago (resta)    : ' + fmtDias(calc.v.cxpDias));
+  var v = calc.v;
+  function ind(nombre, valor){ ln('  ' + rellenar(nombre, 34) + ': ' + (valor === null ? NO_CALCULABLE : valor)); }
+  function det(texto){ ln('        ' + texto); }
+
+  ln('  RENTABILIDAD MENSUAL');
+  ind('Utilidad bruta', calc.utilBruta === null ? null : fmtDinero(calc.utilBruta));
+  if (calc.utilBruta !== null) {
+    det('= ingresos ' + fmtDinero(v.ingresos) + ' - costo de ventas ' + fmtDinero(v.costoVentas));
+    if (calc.margenBrutoPct !== null) det('margen bruto: ' + fmtPorcentaje(calc.margenBrutoPct) + ' de los ingresos');
   }
-  ln('  Capital de trabajo neto         : ' + (calc.ctn === null ? 'No calculable con los datos actuales' : fmtDinero(calc.ctn)));
+  ind('Utilidad operativa (EBIT aprox.)', calc.utilOper === null ? null : fmtDinero(calc.utilOper));
+  if (calc.utilOper !== null) {
+    det('= utilidad bruta ' + fmtDinero(calc.utilBruta) + ' - gastos operativos ' + fmtDinero(v.gastos));
+    if (calc.margenOperPct !== null) det('margen operativo: ' + fmtPorcentaje(calc.margenOperPct) + ' de los ingresos');
+  }
+  ind('EBITDA aproximado', calc.ebitda === null ? null : fmtDinero(calc.ebitda));
+  if (calc.ebitda !== null) det('= utilidad operativa ' + fmtDinero(calc.utilOper) + ' + depreciación y amortización ' + fmtDinero(v.da));
+  else if (calc.utilOper !== null) det('falta la depreciación y amortización; no se asume cero.');
+  ln();
+
+  ln('  LIQUIDEZ Y DEUDA');
+  ind('Capital de trabajo neto', calc.ctn === null ? null : fmtDinero(calc.ctn));
   if (calc.ctn !== null) {
-    ln('      activo corriente estimado : ' + fmtDinero(calc.activo) + '  (por cobrar + inventario)');
-    ln('      pasivo corriente estimado : ' + fmtDinero(calc.pasivo));
-    ln('          cuentas por pagar     : ' + fmtDinero(calc.v.cxpMonto));
-    ln('          deuda a 12 meses      : ' + fmtDinero(calc.porcionCorriente) +
-       (calc.porcionCorriente === calc.v.deudaMonto
-         ? '  (saldo completo: se paga dentro del año)'
-         : '  (12 cuotas; el resto del saldo ' + fmtDinero(calc.v.deudaMonto) + ' es de largo plazo)'));
+    det('activo corriente  ' + fmtDinero(calc.activo) + '  (' + (calc.hayCaja ? 'caja ' + fmtDinero(v.caja) + ' + ' : '') + 'por cobrar + inventario)');
+    det('pasivo corriente  ' + fmtDinero(calc.pasivo) + '  (por pagar ' + fmtDinero(v.cxpMonto) + ' + deuda a 12 meses ' + fmtDinero(calc.porcionCorriente) + ')');
+    det(calc.porcionCorriente === v.deudaMonto
+      ? 'la deuda se termina de pagar dentro del año: entra el saldo completo.'
+      : 'del saldo de ' + fmtDinero(v.deudaMonto) + ' sólo entran 12 cuotas; el resto es largo plazo.');
+    det('NOTA: ' + NOTA_PORCION);
+    if (!calc.hayCaja) det('SIN CAJA REGISTRADA: la liquidez está subestimada.');
   }
-  ln('  Margen operativo mensual        : ' + (calc.margen === null ? 'No calculable con los datos actuales' : fmtDinero(calc.margen)));
+  ind('Razón corriente', calc.razonCorriente === null ? null : fmtRazon(calc.razonCorriente));
+  if (calc.razonCorriente !== null) det('= activo corriente / pasivo corriente. Referencia: <1,0 riesgo; 1,5 a 2,0 saludable.');
+  ind('Prueba ácida', calc.pruebaAcida === null ? null : fmtRazon(calc.pruebaAcida));
+  if (calc.pruebaAcida !== null) det('= (activo corriente - inventario) / pasivo corriente.');
+  if (calc.sinPasivo) det('el pasivo corriente es cero: las razones de liquidez no existen.');
+  ind('Cobertura servicio deuda (DSCR)', calc.dscr === null ? null : fmtRazon(calc.dscr) + ' veces');
+  if (calc.dscr !== null) {
+    det('= (EBITDA ' + fmtDinero(calc.ebitda) + ' x 12) / (cuota ' + fmtDinero(v.deudaPago) + ' x 12)');
+    det(REFERENCIAS_DSCR);
+    det('El EBITDA no descuenta impuestos: la cobertura de un banco puede ser menor.');
+  } else if (calc.sinServicioDeuda) {
+    det('la cuota mensual es cero: no hay servicio de deuda que cubrir.');
+  }
+  /* Siempre, calculable o no el DSCR: los umbrales de liquidez también son de EE. UU. */
+  det(NOTA_MERCADO);
+  ln();
+
+  ln('  CICLO DE EFECTIVO');
+  ind('Ciclo de conversión de efectivo', calc.cce === null ? null : fmtDias(calc.cce));
+  if (calc.cce !== null) {
+    det('días de inventario ' + fmtDias(calc.diasInv) + '  (' + fmtDinero(v.inventario) + ' / (costo de ventas ' + fmtDinero(v.costoVentas) + ' / 30))');
+    det('días de cobro      ' + fmtDias(v.cxcDias));
+    det('días de pago       ' + fmtDias(v.cxpDias) + '  (resta)');
+  } else {
+    det('requiere costo de ventas; no se usa ningún sustituto.');
+  }
+  ln();
+  ln('  ALCANCE');
+  det(NOTA_ALCANCE);
   ln();
 
   regla();
@@ -1107,6 +1414,9 @@ function construirReporte(calc, comp){
     ln('      COSTO TOTAL ESTIMADO     : ' + fmtDinero(f.costoTotal));
     ln('      Pago mensual estimado    : ' + fmtDinero(f.pagoMensual));
     ln('      Pago por periodo         : ' + fmtDinero(f.pagoPeriodo));
+    ln('      DSCR proforma            : ' + (f.dscrProforma === null
+        ? NO_CALCULABLE
+        : fmtRazon(f.dscrProforma) + ' veces — ' + ROTULO_DSCR[f.nivelProforma]));
     ln('      Requisitos documentales  : ' + (f.requisitos ? f.requisitos : 'Sin registrar'));
     ln();
   }
@@ -1119,6 +1429,22 @@ function construirReporte(calc, comp){
   ln('  Sin amortización, sin capitalización de intereses, sin comisiones,');
   ln('  seguros ni impuestos. El costo real será distinto.');
   ln();
+  if (comp.completas.length) {
+    ln('  DSCR proforma: ¿cubre el EBITDA la deuda actual MÁS esta alternativa?');
+    ln('  = (EBITDA x 12) / ((cuota actual + pago mensual de la alternativa) x 12)');
+    ln('  Mismos umbrales que el DSCR actual: < 1,00 no pagable; 1,00 a 1,10 bajo el piso SBA.');
+    ln('  ' + NOTA_MERCADO);
+    if (comp.motivoProforma !== null) {
+      ln('  ' + NO_CALCULABLE + ': ' + comp.motivoProforma);
+    } else {
+      ln('  EBITDA mensual ' + fmtDinero(comp.ebitda) + ' · cuota actual de deuda ' + fmtDinero(comp.cuotaActual) + '.');
+      if (comp.completas.length > 1 && comp.mejorCobertura && comp.mejorCobertura !== comp.completas[0]) {
+        ln('  La alternativa de menor costo (' + comp.completas[0].nombre + ', DSCR ' + fmtRazon(comp.completas[0].dscrProforma) +
+           ') no es la de mejor cobertura (' + comp.mejorCobertura.nombre + ', DSCR ' + fmtRazon(comp.mejorCobertura.dscrProforma) + ').');
+      }
+    }
+    ln();
+  }
   regla();
   ln('Generado por el prototipo Working-Capital Readiness Dashboard.');
   ln('Archivo único, sin conexión a red. Los datos permanecen en el navegador.');
@@ -1140,7 +1466,7 @@ var ultimoReporte = '';
 
 function render(){
   var calc = calcularEmpresa();
-  var comp = calcularAlternativas();
+  var comp = calcularAlternativas(calc);
   pintarMensajesEmpresa();
   pintarResultados(calc);
   pintarComparativo(comp);
